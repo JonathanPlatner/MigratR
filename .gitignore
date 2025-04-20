@@ -1,0 +1,5 @@
+### DotnetCore template
+# .NET Core build folders
+bin/
+obj/
+
