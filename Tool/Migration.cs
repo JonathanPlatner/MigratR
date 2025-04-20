@@ -1,13 +1,13 @@
 using Microsoft.Data.SqlClient;
 
-namespace MigratR;
+namespace Tool;
 
 public record Migration
 {
-    public required string FilePath {get; init; }
+    public required string FilePath { get; init; }
     public string FileName => Path.GetFileName(FilePath);
-    public required string UpScript {get; init; }
-    public required string DownScript {get; init; }
+    public required string UpScript { get; init; }
+    public required string DownScript { get; init; }
 }
 
 public class MigrationRunner
@@ -16,10 +16,10 @@ public class MigrationRunner
     public string MigrationsFolder { get; }
     public const string Delimeter = "--//@ ```MIGRATION SEPARATOR: DO NOT DELETE THIS LINE```";
 
-    public MigrationRunner(string connectionString, string migrationsFolder = "Migrations")
+    public MigrationRunner()
     {
-        _connectionString = connectionString;
-        MigrationsFolder = migrationsFolder;
+        _connectionString = ConfigHandler.GetConnectionString();
+        MigrationsFolder = ConfigHandler.GetMigrationsFolder();
 
         if (!Directory.Exists(MigrationsFolder))
         {
@@ -64,7 +64,7 @@ public class MigrationRunner
     public Migration ParseMigrationFile(string filePath)
     {
         var content = File.ReadAllText(filePath);
-        
+
         var parts = content.Split(Delimeter);
         if (parts.Length != 2)
         {
@@ -81,32 +81,32 @@ public class MigrationRunner
 
     public void ApplyMigration(Migration migration)
     {
-        Console.WriteLine($"Applying migration: {migration.FileName}");
+        Console.WriteLine($"Applying {migration.FileName}");
         const string historySql = "insert into migrations (migration_file, applied_on) values (@file, @appliedOn)";
         using var connection = new SqlConnection(_connectionString);
         connection.Open();
-        
+
         using var migrateCommand = new SqlCommand(migration.UpScript, connection);
         migrateCommand.ExecuteNonQuery();
-        
+
         using var command = new SqlCommand(historySql, connection);
-        command.Parameters.AddWithValue("@file", migration.FilePath);
+        command.Parameters.AddWithValue("@file", Path.GetFileName(migration.FilePath));
         command.Parameters.AddWithValue("@appliedOn", DateTime.Now);
         command.ExecuteNonQuery();
     }
 
     public void RollbackMigration(Migration migration)
     {
-        Console.WriteLine($"Rolling back migration: {migration.FileName}");
+        Console.WriteLine($"Reverting {migration.FileName}");
         const string historySql = "delete from migrations where migration_file = @file";
         using var connection = new SqlConnection(_connectionString);
         connection.Open();
-        
+
         var rollbackCommand = new SqlCommand(migration.DownScript, connection);
         rollbackCommand.ExecuteNonQuery();
-        
+
         using var historyCommand = new SqlCommand(historySql, connection);
-        historyCommand.Parameters.AddWithValue("@file", migration.FilePath);
+        historyCommand.Parameters.AddWithValue("@file", Path.GetFileName(migration.FilePath));
         historyCommand.ExecuteNonQuery();
     }
 
@@ -120,6 +120,7 @@ public class MigrationRunner
             var fileName = Path.GetFileName(file);
             if (appliedMigrations.Contains(fileName))
             {
+                Console.WriteLine($"Skipping {fileName}");
                 continue;
             }
 
@@ -137,42 +138,49 @@ public class MigrationRunner
             Console.WriteLine("No migrations have been applied");
             return;
         }
-        
+
         var migrationsToRollback = appliedMigrations.Reverse<string>().Take(count).ToList();
         foreach (var migrationFile in migrationsToRollback)
         {
             var filePath = Path.Combine(MigrationsFolder, migrationFile);
-            if (!File.Exists(migrationFile))
+            if (!File.Exists(filePath))
             {
                 Console.WriteLine($"Migration file {migrationFile} not found. Aborting.");
                 return;
             }
-            
-            var migration = ParseMigrationFile(migrationFile);
+
+            var migration = ParseMigrationFile(filePath);
             RollbackMigration(migration);
         }
     }
 
-    public void CreateNewMigration(string migrationFileName)
+    public static void CreateNewMigration(string migrationFileName)
     {
         var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
         var escapedName = migrationFileName.Replace(" ", "_");
+        var migrationsFolder = ConfigHandler.GetMigrationsFolder();
+        var directory = Directory.GetCurrentDirectory();
+        if (!Directory.Exists(Path.Combine(directory, migrationsFolder)))
+        {
+            Directory.CreateDirectory(Path.Combine(directory, migrationsFolder));
+        }
         var fileName = $"{timestamp}_{escapedName}.sql";
-        var filePath = Path.Combine(MigrationsFolder, fileName);
+
+        var filePath = Path.Combine(migrationsFolder, fileName);
 
         var content = $"""
                        -- Migration: {fileName}
+
                        -- UP
                        -- Write your forward migration SQL statements here
 
                        {Delimeter}
 
-                       -- Write your rollback migration SQL statements here
                        -- DOWN
+                       -- Write your rollback migration SQL statements here
                        """;
-        
+
         File.WriteAllText(filePath, content);
         Console.WriteLine($"Created new migration file: {filePath}");
     }
-    
 }
