@@ -1,4 +1,6 @@
 # MigratR
+Stupid simple pure SQL migrations.
+
 As of version 0.4.0, this tool is only compatible with mssql.
 # Usage Instructions
 1. Download the latest .nupkg file from releases.
